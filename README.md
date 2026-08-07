@@ -4,7 +4,7 @@ A highly scalable, pipelined **N-point Fast Fourier Transform (FFT)** processor 
 
 Data is processed continuously, one complex sample per clock cycle, with no block-buffering — samples flow through `log2(N)` cascaded radix-2 butterfly stages like a conveyor belt, closing timing cleanly and emitting a continuous stream of frequency bins. This repository's reference configuration instantiates a **256-point** FFT (`N = 256`, 8 stages).
 
-Target device: **Xilinx Zynq-7000 (xc7z010clg400-1)**
+Target device: **Artix-7**
 
 
 ## Core Technical Specifications
@@ -21,40 +21,72 @@ Target device: **Xilinx Zynq-7000 (xc7z010clg400-1)**
 Data samples stream through cascading processing blocks sequentially. Internal feedback shift registers dynamically shrink by half at every subsequent stage ($128 \rightarrow 64 \rightarrow 32 \dots \rightarrow 1$).
 
 ```text
-                             +----------------------------------------+
-                             |              STAGE (m)                 |
-                             |                                        |
-  Incoming Stream            |                  +----------------+    |
-  Data (Real/Imag)           |                  | Shift Register |    |
-  -------+-------------------+----------------->|  Delay Buffer  |    |
-         |                   |                  | (Size = N/2^m) |    |
-         |                   |                  +-------+--------+    |
-         |                   |                          |             |
-         |                   |                          | (x_buf)     |
-         |                   |                          v             |
-         |                   |                    /-----------/       |
-         |                   |                   /   MUX A   /        |
-         |                   |                  /-----------/         |
-         |                   |                    |       |           |
-         v                   |        [phase==0]  |       | [phase==1]|
-  +--------------+           |        (Buffering) |       | (Compute) |
-  |              |           |                    v       v           |
-  |   Radix-2    |--(Sum)----+------------------->[0]     |           |
-  |  Butterfly   |           |                    |       |           |
-  |    Engine    |           |                    | MUX B |<----------+
-  |              |--(Diff)---+------------------->[1]     |
-  +------^-------+           |                    |       |
-         |                   |                    +---+---+
-         |                   |                        | 
-         +-------------------|------------------------+ 
-                             |                        | (Un-rotated out / Diff)
-                             |                        v
-                             |                +---------------+
-                             |  +----------+  |    Complex    |    Outgoing Stream
-                             |  | Twiddle  |->|  Multiplier   |---> Data
-                             |  |   ROM    |  |  (Cross-Mult) |    (To Stage m+1)
-                             |  +----------+  +---------------+
-                             +----------------------------------------+
+                              STAGE (m)
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  Incoming Stream                                                    │
+│  Data (Real/Imag)                                                   │
+│        │                                                            │
+│        ├──────────────────────────────┐                             │
+│        │                              │                             │
+│        │                              ▼                             │
+│        │                     ┌─────────────────┐                    │
+│        │                     │  Shift Register │                    │
+│        │                     │   Delay Buffer  │                    │
+│        │                     │   Size = N/2^m  │                    │
+│        │                     └────────┬────────┘                    │
+│        │                              │                             │
+│        │                            x_buf                           │
+│        │                              │                             │
+│        │                              ▼                             │
+│        │                         ┌─────────┐                        │
+│        │                         │  MUX A  │                        │
+│        │                         └────┬────┘                        │
+│        │                              │                             │
+│        │                 ┌────────────┴────────────┐                │
+│        │                 │                         │                │
+│        │          phase = 0                  phase = 1              │
+│        │          (Buffering)                 (Compute)             │
+│        │                 │                         │                │
+│        ▼                 ▼                         ▼                │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    Radix-2 Butterfly                        │    │
+│  │                                                             │    │
+│  │                 SUM = A + B                                 │    │
+│  │                 DIFF = A - B                                │    │
+│  └──────────────────────────┬──────────────────────────────────┘    │
+│                             │                                       │
+│                     ┌───────┴────────┐                              │
+│                     │                │                              │
+│                    SUM              DIFF                            │
+│                     │                │                              │
+│                     ▼                ▼                              │
+│                   [0]              [1]                              │
+│                     │                │                              │
+│                     └───────┬────────┘                              │
+│                             ▼                                       │
+│                          ┌───────┐                                  │
+│                          │ MUX B │◄──────────── Feedback            │
+│                          └───┬───┘                                  │
+│                              │                                      │
+│                                                                     │
+│                              │                                      │
+│                              ▼                                      │
+│                    ┌───────────────────┐                            │
+│                    │   Twiddle ROM     │                            │
+│                    └─────────┬─────────┘                            │
+│                              │                                      │
+│                              ▼                                      │
+│                    ┌───────────────────┐                            │
+│                    │ Complex Multiplier│                            │
+│                    │    (Cross-Mult)   │                            │
+│                    └─────────┬─────────┘                            │
+│                              │                                      │
+└──────────────────────────────┼──────────────────────────────────────┘
+                               │
+                               ▼
+                       Outgoing Stream
+                        (To Stage m+1)
 ```
 ---
 ## Repository Structure
